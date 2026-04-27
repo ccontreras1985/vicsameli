@@ -1,0 +1,214 @@
+# .github/workflows/sync.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# RAI SPA · Sincronizador automático Vicsa ↔ Mercado Libre
+#
+# Ejecuta dos jobs:
+#   1. sync-rapido:   cada hora → actualiza stock y precios en ML (~8 min total)
+#   2. sync-completo: cada día a las 3am Chile → recorre catálogo completo (~35 min)
+#
+# Secrets requeridos (configurar en GitHub → Settings → Secrets → Actions):
+#   VICSA_USER        → email de Vicsa Conectados
+#   VICSA_PASS        → contraseña de Vicsa Conectados
+#   ML_APP_ID         → App ID de Mercado Libre Developers
+#   ML_CLIENT_SECRET  → Client Secret de ML
+#   ML_ACCESS_TOKEN   → Access Token (renovar cada 6h via refresh)
+#   ML_REFRESH_TOKEN  → Refresh Token (para renovar el Access Token)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: RAI SPA · Sync Vicsa ↔ ML
+
+on:
+  schedule:
+    # Modo rápido: cada hora (stock y precios)
+    - cron: '0 * * * *'
+    # Modo completo: cada día a las 3am hora Chile (UTC-3 → 6am UTC)
+    - cron: '0 6 * * *'
+
+  # Permite correr manualmente desde GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'Modo de ejecución'
+        required: true
+        default: 'rapido'
+        type: choice
+        options:
+          - rapido
+          - completo
+          - publicar
+
+jobs:
+  # ── JOB 1: Renovar Access Token (antes de cualquier sync) ─────────────────
+  renovar-token:
+    name: Renovar Token ML
+    runs-on: ubuntu-latest
+    outputs:
+      access_token: ${{ steps.refresh.outputs.access_token }}
+
+    steps:
+      - name: Renovar Access Token con Refresh Token
+        id: refresh
+        run: |
+          RESPONSE=$(curl -s -X POST "https://api.mercadolibre.com/oauth/token" \
+            -H "accept: application/json" \
+            -H "content-type: application/x-www-form-urlencoded" \
+            -d "grant_type=refresh_token&client_id=${{ secrets.ML_APP_ID }}&client_secret=${{ secrets.ML_CLIENT_SECRET }}&refresh_token=${{ secrets.ML_REFRESH_TOKEN }}")
+
+          ACCESS_TOKEN=$(echo $RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))")
+
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "ERROR: No se pudo renovar el token"
+            echo "Respuesta: $RESPONSE"
+            exit 1
+          fi
+
+          echo "Token renovado ✓"
+          echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
+  # ── JOB 2: Sync rápido (cada hora) ────────────────────────────────────────
+  sync-rapido:
+    name: Sync Rápido (stock/precio)
+    runs-on: ubuntu-latest
+    needs: renovar-token
+    # Solo corre en el cron de cada hora, no en el de las 6am ni en manual completo
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 * * * *') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'rapido')
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install playwright requests openpyxl
+          playwright install chromium --with-deps
+
+      # Descargar el último JSON completo desde artifacts previos
+      - name: Descargar catálogo previo
+        uses: actions/download-artifact@v4
+        with:
+          name: catalogo-completo
+          path: output_vicsa/
+        continue-on-error: true  # No falla si no hay artifact previo
+
+      - name: Correr scraper modo rápido
+        env:
+          VICSA_USER: ${{ secrets.VICSA_USER }}
+          VICSA_PASS: ${{ secrets.VICSA_PASS }}
+        run: |
+          mkdir -p output_vicsa
+          python scraper_v13.py --modo rapido \
+            --categorias "Calzado de Seguridad" "Ropa Tecnica" "Ropa de Trabajo"
+
+      - name: Sincronizar stock con ML
+        env:
+          ML_APP_ID: ${{ secrets.ML_APP_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_ACCESS_TOKEN: ${{ needs.renovar-token.outputs.access_token }}
+        run: |
+          python sync_ml.py --modo stock
+
+      - name: Guardar delta como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-delta-${{ github.run_id }}
+          path: output_vicsa/stock_delta_*.json
+          retention-days: 3
+
+  # ── JOB 3: Sync completo (cada día a las 3am Chile) ───────────────────────
+  sync-completo:
+    name: Sync Completo (catálogo)
+    runs-on: ubuntu-latest
+    needs: renovar-token
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 6 * * *') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'completo')
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install playwright requests openpyxl
+          playwright install chromium --with-deps
+
+      - name: Correr scraper modo completo
+        env:
+          VICSA_USER: ${{ secrets.VICSA_USER }}
+          VICSA_PASS: ${{ secrets.VICSA_PASS }}
+        run: |
+          mkdir -p output_vicsa
+          python scraper_v13.py \
+            --categorias "Calzado de Seguridad" "Ropa Tecnica" "Ropa de Trabajo" \
+            --sin-imagenes
+
+      - name: Sincronizar nuevos productos con ML
+        env:
+          ML_APP_ID: ${{ secrets.ML_APP_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_ACCESS_TOKEN: ${{ needs.renovar-token.outputs.access_token }}
+        run: |
+          python sync_ml.py --modo publicar
+
+      - name: Guardar catálogo como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogo-completo
+          path: output_vicsa/catalogo_vicsa_*.json
+          retention-days: 2  # Solo necesitamos el más reciente
+
+  # ── JOB 4: Publicación inicial (solo manual) ───────────────────────────────
+  publicar-inicial:
+    name: Publicación Inicial ML
+    runs-on: ubuntu-latest
+    needs: renovar-token
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'publicar'
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Descargar catálogo
+        uses: actions/download-artifact@v4
+        with:
+          name: catalogo-completo
+          path: output_vicsa/
+
+      - name: Publicar en ML
+        env:
+          ML_APP_ID: ${{ secrets.ML_APP_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          ML_ACCESS_TOKEN: ${{ needs.renovar-token.outputs.access_token }}
+        run: |
+          python sync_ml.py --modo publicar
+
+      - name: Guardar DB de publicaciones
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-items-db
+          path: output_vicsa/ml_items_db.json
+          retention-days: 90
