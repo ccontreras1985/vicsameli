@@ -76,12 +76,11 @@ jobs:
           VICSA_PASS: ${{ secrets.VICSA_PASS }}
         run: |
           mkdir -p output_vicsa
+          # Por ahora solo calzado. Ropa pendiente: requiere crear SIZE_GRID textil.
           if [ "${{ steps.modo.outputs.modo }}" = "completo" ]; then
-            python scraper_v13.py \
-              --categorias "Calzado de Seguridad" "Ropa Tecnica" "Ropa de Trabajo"
+            python scraper_v13.py --categorias "Calzado de Seguridad"
           else
-            python scraper_v13.py --modo rapido \
-              --categorias "Calzado de Seguridad" "Ropa Tecnica" "Ropa de Trabajo"
+            python scraper_v13.py --modo rapido --categorias "Calzado de Seguridad"
           fi
 
       - name: Sync con ML
