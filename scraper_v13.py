@@ -735,11 +735,17 @@ def guardar_xlsx(productos, path):
     campos = ["sku","nombre","categoria","talla","color","precio_neto",
               "stock_vicsa","stock_publicar",
               "especificaciones","ficha_tecnica_url","certificaciones","imagen","url_producto"]
+    # Sanitiza caracteres ilegales para XLSX (chars de control que openpyxl rechaza)
+    _illegal_xlsx = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
+    def _clean(v):
+        if isinstance(v, str):
+            return _illegal_xlsx.sub('', v)
+        return v
     for i,p in enumerate(productos):
         r = i+3
         bg = BL if i%2==0 else AL
         for c,campo in enumerate(campos,1):
-            val = p.get(campo,"")
+            val = _clean(p.get(campo,""))
             cell = ws.cell(row=r, column=c, value=val)
             cell.fill = fill(bg)
             cell.border = thin()
@@ -883,7 +889,10 @@ async def main():
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     guardar_json(todos,  OUTPUT_DIR / f"catalogo_vicsa_{ts}.json")
     guardar_csv(todos,   OUTPUT_DIR / f"catalogo_vicsa_{ts}.csv")
-    guardar_xlsx(todos,  OUTPUT_DIR / f"catalogo_vicsa_{ts}.xlsx")
+    try:
+        guardar_xlsx(todos,  OUTPUT_DIR / f"catalogo_vicsa_{ts}.xlsx")
+    except Exception as e:
+        log(f"  ! XLSX falló (no crítico, JSON ya guardado): {str(e)[:200]}")
 
     n_imgs = len(list(IMG_DIR.glob("*"))) if IMG_DIR.exists() else 0
     log(f"\n{'='*55}")
