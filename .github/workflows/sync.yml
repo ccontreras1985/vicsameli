@@ -46,7 +46,7 @@ jobs:
 
       - name: Instalar dependencias
         run: |
-          pip install playwright requests openpyxl Pillow
+          pip install -r requirements.txt
           playwright install chromium --with-deps
 
       - name: Decidir modo
