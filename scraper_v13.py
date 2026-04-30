@@ -285,11 +285,48 @@ async def login_automatico(page):
     log(f"Login OK ✓ → {url_actual}")
 
 # ─── Extracción del listado ───────────────────────────────────────────────────
+def extraer_tallas_html(html: str) -> dict:
+    """Mapea item_N → talla extraída del <td> visible 'talla XX' que sigue al codExt."""
+    tallas = {}
+    for m in re.finditer(r'name="item_(\d+)_prod_1_codExt"[^>]*value="\d+"', html):
+        n   = m.group(1)
+        end = m.end()
+        ventana = html[end:end+4000]
+        talla_m = re.search(
+            r'<span[^>]*>\s*Talla\s*</span>\s*talla\s+([A-Z0-9./\-]+)',
+            ventana, re.IGNORECASE
+        )
+        if talla_m:
+            t = talla_m.group(1).strip().upper()
+            t = re.sub(r'^T\.?', '', t)
+            tallas[n] = t
+    return tallas
+
+def extraer_stock_html(html: str) -> dict:
+    """Mapea item_N → stock real (Pud) por variante.
+    Vicsa expone 'Pud N' en cada fila de la tabla y un botón 'Sin Stock' si N=0."""
+    stocks = {}
+    for m in re.finditer(r'name="item_(\d+)_prod_1_codExt"[^>]*value="\d+"', html):
+        n   = m.group(1)
+        end = m.end()
+        ventana = html[end:end+4000]
+        # Cortar la ventana al siguiente item para no leer stock del vecino
+        sig = re.search(r'name="item_\d+_prod_1_codExt"', ventana)
+        if sig:
+            ventana = ventana[:sig.start()]
+        pud_m = re.search(r'<span[^>]*>\s*Pud\s*</span>\s*(\d+)', ventana, re.IGNORECASE)
+        if pud_m:
+            stocks[n] = int(pud_m.group(1))
+        elif re.search(r'value="Sin Stock"', ventana, re.IGNORECASE):
+            stocks[n] = 0
+    return stocks
+
 def extraer_productos_listado(html, cat_nombre):
     idprods = dict(re.findall(r'name="item_(\d+)_prod_1_idprod"[^>]*value="(\d+)"', html))
     codexts = dict(re.findall(r'name="item_(\d+)_prod_1_codExt"[^>]*value="([^"]+)"', html))
     nombres = dict(re.findall(r'name="msgNombre(\d+)"[^>]*value="([^"]+)"', html))
     precios = dict(re.findall(r'name="msgPrecio(\d+)"[^>]*value="([\d\.\,]+)"', html))
+    tallas_html = extraer_tallas_html(html)
     urls_cat = re.findall(r'id_cat=(\d+)&(?:amp;)?id_prod=(\d+)', html)
     idprod_to_cat = {idp: idc for idc, idp in urls_cat}
 
@@ -320,6 +357,8 @@ def extraer_productos_listado(html, cat_nombre):
         vistos_sku.add(sku)
 
         color, talla = detectar_color_talla(nombre)
+        if not talla:
+            talla = tallas_html.get(n, "")
 
         productos.append({
             "sku":              sku,
@@ -357,19 +396,57 @@ async def enriquecer_producto(page, prod, descargar_img):
             if color: prod["color"] = color
             if talla: prod["talla"] = talla
 
-        cod_m = re.search(r'productoCodigo[^>]*>.*?(\d{8,})', html, re.DOTALL)
-        if cod_m:
-            prod["sku"] = cod_m.group(1).strip()
+        # Talla extraída del <td> visible que coincide con el SKU de este producto.
+        # Localiza el codExt del SKU y busca solo en los siguientes 2KB para no cruzar
+        # al item siguiente.
+        if not prod.get("talla"):
+            sku_actual = prod.get("sku", "")
+            if sku_actual:
+                idx = html.find(f'value="{sku_actual}"')
+                if idx >= 0:
+                    ventana = html[idx:idx+2500]
+                    m = re.search(
+                        r'<span[^>]*>\s*Talla\s*</span>\s*talla\s+([A-Z0-9./\-]+)',
+                        ventana, re.IGNORECASE
+                    )
+                    if m:
+                        t = m.group(1).strip().upper()
+                        t = re.sub(r'^T\.?', '', t)
+                        prod["talla"] = t
+
+        # NO sobrescribir el SKU: la ficha individual lista TODOS los SKUs del producto
+        # (uno por talla), pero el SKU correcto para esta variante es el que vino del listado.
+        # Sobrescribir colapsa todos los variantes a un único SKU y la dedup posterior
+        # los elimina (bug histórico: Apollo Cafe 13 tallas → 1 sola variante).
+        # cod_m = re.search(r'productoCodigo[^>]*>.*?(\d{8,})', html, re.DOTALL)
+        # if cod_m:
+        #     prod["sku"] = cod_m.group(1).strip()
 
         precio_m = re.search(r'Precio distribuidor[^\$]*\$([\d\.\,]+)', html)
         if precio_m:
             prod["precio_neto"] = parse_precio(precio_m.group(1))
 
-        # Stock desde ficha individual (más confiable que el listado)
-        sin_stock = bool(re.search(r'sin.stock|agotado|no.disponible', html, re.IGNORECASE))
-        stock_ficha = 0 if sin_stock else 5
-        prod["stock_vicsa"]  = stock_ficha
-        prod["stock_publicar"] = stock_conservador(stock_ficha)
+        # Stock POR TALLA: extrae el Pud específico para el SKU de esta variante.
+        # No usar un check global "sin stock" en toda la ficha — eso colapsa todas
+        # las tallas a 0 si solo una está sin stock (bug histórico).
+        sku_actual = prod.get("sku", "")
+        if sku_actual:
+            idx = html.find(f'value="{sku_actual}"')
+            if idx >= 0:
+                # Buscar el siguiente item_N para no cruzar al vecino
+                ventana = html[idx:idx+4000]
+                sig = re.search(r'name="item_\d+_prod_1_codExt"', ventana[100:])
+                if sig:
+                    ventana = ventana[:100 + sig.start()]
+                pud_m = re.search(r'<span[^>]*>\s*Pud\s*</span>\s*(\d+)', ventana, re.IGNORECASE)
+                if pud_m:
+                    stock_ficha = int(pud_m.group(1))
+                elif re.search(r'value="Sin Stock"', ventana, re.IGNORECASE):
+                    stock_ficha = 0
+                else:
+                    stock_ficha = 5  # fallback conservador
+                prod["stock_vicsa"]    = stock_ficha
+                prod["stock_publicar"] = stock_conservador(stock_ficha)
 
         for aleta in re.findall(r'aleta[^"]*"[^"]*"[^>]*>(.*?)</(?:div|section)', html, re.DOTALL | re.IGNORECASE):
             txt = limpiar(re.sub(r'<[^>]+>', ' ', aleta))

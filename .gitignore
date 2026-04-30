@@ -1,0 +1,21 @@
+# Secrets / tokens (NUNCA commitear)
+output_vicsa/.env_ml
+
+# Imágenes y catálogos generados (no se persisten en repo)
+output_vicsa/imagenes/
+output_vicsa/catalogo_vicsa_*.json
+output_vicsa/catalogo_vicsa_*.csv
+output_vicsa/catalogo_vicsa_*.xlsx
+output_vicsa/stock_delta_*.json
+
+# OK persistir: state e índice de imágenes (los necesita GitHub Actions)
+# output_vicsa/ml_state.json
+# output_vicsa/ml_pictures_cache.json
+
+# Debug / artefactos locales
+debug_*.html
+debug_talla.py
+test_extractor_talla.py
+__pycache__/
+*.pyc
+.venv/
