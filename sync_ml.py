@@ -387,20 +387,67 @@ def publicar_nuevo(prod: dict, ml: MLClient, dry_run: bool, pic_cache: dict = No
     log(f"  ERR {prod['nombre_base'][:40]}: {r.status_code} {r.text[:600]}")
     return None
 
-def actualizar_item(sku: str, item_id: str, stock: int, costo: float,
-                    ml: MLClient, dry_run: bool) -> bool:
-    precio  = precio_venta(costo)
-    status  = "active" if stock > 0 else "paused"
-    payload = {"available_quantity": stock, "price": precio, "status": status}
+def actualizar_item(prod: dict, item_id: str, ml: MLClient, dry_run: bool) -> bool:
+    """Actualiza stock/precio de un item existente.
+    Items con variaciones requieren actualizar cada variación por su id (no a nivel item).
+    """
     if dry_run:
-        log(f"  [DRY] {item_id}: stock={stock} ${precio:,} {status}")
+        total = sum(v.get("stock_publicar", 0) for v in prod["variantes"])
+        log(f"  [DRY] UPDATE {item_id} ({len(prod['variantes'])} vars, stock total={total})")
         return True
+
+    # GET item para obtener los IDs de cada variación + el seller_custom_field (=SKU Vicsa)
+    r = ml.get(f"/items/{item_id}")
+    if not r.ok:
+        log(f"  ERR GET {item_id}: {r.status_code} {r.text[:150]}")
+        return False
+    item_data = r.json()
+    sku_to_var_id = {v.get("seller_custom_field"): v["id"]
+                     for v in item_data.get("variations", [])
+                     if v.get("seller_custom_field")}
+
+    if not sku_to_var_id:
+        # Item sin variaciones (caso raro): actualizar a nivel item
+        v0 = prod["variantes"][0]
+        stock = v0.get("stock_publicar", 0)
+        payload = {
+            "available_quantity": stock,
+            "price":              precio_venta(v0["precio_neto"]),
+            "status":             "active" if stock > 0 else "paused",
+        }
+        r = ml.put(f"/items/{item_id}", payload)
+        if r.ok:
+            log(f"  OK   {item_id} stock={stock}")
+            return True
+        log(f"  ERR  {item_id}: {r.status_code} {r.text[:150]}")
+        return False
+
+    # Construir actualizaciones por variación
+    var_updates = []
+    for v in prod["variantes"]:
+        vid = sku_to_var_id.get(v["sku"])
+        if not vid:
+            continue  # SKU no existe en el item ML
+        var_updates.append({
+            "id":                 vid,
+            "available_quantity": v.get("stock_publicar", 0),
+            "price":              precio_venta(v["precio_neto"]),
+        })
+
+    if not var_updates:
+        log(f"  ERR  {item_id}: ningún SKU coincide con variaciones del item")
+        return False
+
+    total_stock = sum(u["available_quantity"] for u in var_updates)
+    payload = {
+        "variations": var_updates,
+        "status":     "active" if total_stock > 0 else "paused",
+    }
     r = ml.put(f"/items/{item_id}", payload)
     if r.ok:
-        icono = "⏸" if status == "paused" else "✓"
-        log(f"  {icono} {item_id} stock={stock} ${precio:,}")
+        log(f"  OK   {item_id} stock_total={total_stock} ({len(var_updates)} vars)")
         return True
-    log(f"  ✗ {item_id}: {r.status_code} {r.text[:120]}")
+    log(f"  ERR  {item_id}: {r.status_code} {r.text[:200]}")
     return False
 
 def sync_completo(path: Path, ml: MLClient, state: dict, dry_run: bool, cats: list):
@@ -421,10 +468,8 @@ def sync_completo(path: Path, ml: MLClient, state: dict, dry_run: bool, cats: li
         ml_id = next((state[v["sku"]] for v in prod["variantes"] if v["sku"] in state), None)
 
         if ml_id:
-            # Actualizar stock/precio de la primera variante publicada
-            v0 = prod["variantes"][0]
-            ok = actualizar_item(v0["sku"], ml_id, v0.get("stock_publicar", 0),
-                                 v0["precio_neto"], ml, dry_run)
+            # Actualizar el item ML (stock/precio por cada variación)
+            ok = actualizar_item(prod, ml_id, ml, dry_run)
             act += 1 if ok else 0
             err += 0 if ok else 1
         elif not tiene_stock:
@@ -456,13 +501,21 @@ def sync_delta(path: Path, ml: MLClient, state: dict, dry_run: bool):
     cambios = data.get("cambios", [])
     log(f"Cambios: {len(cambios)}")
 
-    act = sin_pub = err = 0
+    # Agrupar cambios por item_id (un item ML puede tener varios SKUs cambiados)
+    por_item = {}
+    sin_pub = 0
     for c in cambios:
         sku = c.get("sku")
         if sku not in state:
             sin_pub += 1
             continue
-        ok = actualizar_item(sku, state[sku], c.get("stock_publicar",0), c.get("precio_neto",0), ml, dry_run)
+        item_id = state[sku]
+        por_item.setdefault(item_id, []).append(c)
+
+    act = err = 0
+    for item_id, variantes in por_item.items():
+        prod_fake = {"nombre_base": "DELTA", "variantes": variantes}
+        ok = actualizar_item(prod_fake, item_id, ml, dry_run)
         act += 1 if ok else 0
         err += 0 if ok else 1
         time.sleep(DELAY_ITEMS)
