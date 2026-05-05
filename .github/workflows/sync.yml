@@ -60,6 +60,21 @@ jobs:
             echo "modo=rapido" >> $GITHUB_OUTPUT
           fi
 
+      # Descargar el catálogo completo más reciente (cualquier run anterior).
+      # El modo rápido lo usa como baseline para calcular el delta.
+      - name: Descargar catálogo previo
+        run: |
+          mkdir -p output_vicsa
+          URL=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=catalogo-completo&per_page=1" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); a=d.get('artifacts',[]); print(a[0]['archive_download_url']) if a and not a[0].get('expired') else print('')")
+          if [ -n "$URL" ]; then
+            curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -o /tmp/cat.zip "$URL"
+            unzip -q /tmp/cat.zip -d output_vicsa/ 2>/dev/null && echo "Catálogo previo OK." || echo "Sin catálogo válido."
+          else
+            echo "Sin artifact de catálogo. Modo rápido caerá a completo."
+          fi
+
       - name: Renovar Access Token
         id: token
         run: |
@@ -71,13 +86,21 @@ jobs:
           echo "access_token=$AT" >> $GITHUB_OUTPUT
 
       - name: Scraper
+        id: scraper
         env:
           VICSA_USER: ${{ secrets.VICSA_USER }}
           VICSA_PASS: ${{ secrets.VICSA_PASS }}
         run: |
           mkdir -p output_vicsa
+          MODO="${{ steps.modo.outputs.modo }}"
+          # Si modo=rapido pero no hay catálogo baseline → caer a completo
+          if [ "$MODO" = "rapido" ] && [ -z "$(ls output_vicsa/catalogo_vicsa_*.json 2>/dev/null)" ]; then
+            echo "Sin baseline para rápido → corriendo completo."
+            MODO="completo"
+          fi
+          echo "modo_efectivo=$MODO" >> $GITHUB_OUTPUT
           # Por ahora solo calzado. Ropa pendiente: requiere crear SIZE_GRID textil.
-          if [ "${{ steps.modo.outputs.modo }}" = "completo" ]; then
+          if [ "$MODO" = "completo" ]; then
             python scraper_v13.py --categorias "Calzado de Seguridad"
           else
             python scraper_v13.py --modo rapido --categorias "Calzado de Seguridad"
@@ -91,7 +114,8 @@ jobs:
           ML_REFRESH_TOKEN: ${{ secrets.ML_REFRESH_TOKEN }}
           ML_USER_ID:       ${{ secrets.ML_USER_ID }}
         run: |
-          if [ "${{ steps.modo.outputs.modo }}" = "completo" ]; then
+          MODO="${{ steps.scraper.outputs.modo_efectivo }}"
+          if [ "$MODO" = "completo" ]; then
             JSON=$(ls -t output_vicsa/catalogo_vicsa_*.json | head -1)
             python sync_ml.py --json "$JSON" --categorias "Calzado de Seguridad"
           else
@@ -102,6 +126,16 @@ jobs:
               echo "Sin delta para procesar."
             fi
           fi
+
+      # Guardar el catálogo completo como artifact (para que el próximo run rápido lo use)
+      - name: Persistir catálogo
+        if: steps.scraper.outputs.modo_efectivo == 'completo'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalogo-completo
+          path: output_vicsa/catalogo_vicsa_*.json
+          retention-days: 7
+          overwrite: true
 
       - name: Commit state actualizado
         run: |
