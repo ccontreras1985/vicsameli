@@ -267,17 +267,44 @@ class MLClient:
     def put(self, url, data):          return self._req("put",  url, json=data)
 
     def upload_picture(self, image_path: Path) -> str:
-        """Sube una imagen local a ML y devuelve el picture_id. None si falla."""
+        """Sube una imagen local a ML y devuelve el picture_id. None si falla.
+        Hace padding a 600x600 con fondo blanco si es chica (ML exige >=500px)."""
         if not image_path.exists():
             return None
-        for i in range(MAX_REINTENTOS):
+        try:
+            from PIL import Image
+            import io as _io
+            img = Image.open(image_path).convert("RGBA")
+            w, h = img.size
+            bg = Image.new("RGB", (w, h), (255, 255, 255))
+            bg.paste(img, mask=img.split()[3] if img.mode == "RGBA" else None)
+            img = bg
+            min_size = 600
+            if min(w, h) < min_size:
+                ratio = min_size / min(w, h)
+                img = img.resize((int(w*ratio), int(h*ratio)), Image.LANCZOS)
+            target = max(img.size[0], img.size[1], min_size)
+            canvas = Image.new("RGB", (target, target), (255, 255, 255))
+            canvas.paste(img, ((target - img.size[0]) // 2, (target - img.size[1]) // 2))
+            buf = _io.BytesIO()
+            canvas.save(buf, format="JPEG", quality=92)
+            data = buf.getvalue()
+            name = image_path.stem + ".jpg"
+            mime = "image/jpeg"
+        except Exception as e:
+            log(f"  ! Error procesando imagen {image_path.name}: {e}")
             with open(image_path, "rb") as f:
-                files = {"file": (image_path.name, f, "image/png")}
-                r = self.s.post(
-                    f"{API_BASE}/pictures/items/upload",
-                    headers={"Authorization": f"Bearer {self.access_token}"},
-                    files=files,
-                )
+                data = f.read()
+            name = image_path.name
+            mime = "image/png"
+
+        for i in range(MAX_REINTENTOS):
+            files = {"file": (name, data, mime)}
+            r = self.s.post(
+                f"{API_BASE}/pictures/items/upload",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                files=files,
+            )
             if r.status_code == 401:
                 self._renovar(); continue
             if r.status_code == 429:
