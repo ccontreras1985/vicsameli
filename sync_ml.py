@@ -113,6 +113,11 @@ def detectar_tipo_producto(nombre: str) -> str:
         return "ropa"
     return "otro"
 
+# Subcategorías de ropa que NO requieren SIZE_GRID_ID (publican con SIZE simple)
+ROPA_CATS_SIN_GRID = {"MLC433707"}  # Camperas / Parkas / Chalecos
+# Subcategorías que SÍ exigen SIZE_GRID_ID — pendientes de chart manual
+ROPA_CATS_CON_GRID = {"MLC440795": "Poleras", "MLC417961": "Pantalones"}
+
 SIZE_GRID_ID = "5193042"
 # Mapeo verificado: chart actual cubre tallas 35-45 (filas 1-11).
 # Tallas 34, 46-48 se omitirán hasta crear un chart nuevo en ML.
@@ -329,9 +334,13 @@ def publicar_nuevo(prod: dict, ml: MLClient, dry_run: bool, pic_cache: dict = No
     if tipo == "otro":
         log(f"  SKIP no clasificable como calzado/ropa")
         return "SKIP"
+    # Para ropa, decidir cat_ml acá: si es una sub que requiere chart y no la tenemos,
+    # se hace SKIP. Si es una sub sin chart (camperas/parkas), publica sin SIZE_GRID.
     if tipo == "ropa":
-        log(f"  SKIP ropa pendiente (falta SIZE_GRID para categoría textil)")
-        return "SKIP"
+        cat_ropa = detectar_categoria_ropa(prod["nombre_base"])
+        if cat_ropa in ROPA_CATS_CON_GRID:
+            log(f"  SKIP {ROPA_CATS_CON_GRID[cat_ropa]}: pendiente de SIZE_GRID textil")
+            return "SKIP"
 
     # Subir imagen real (o usar placeholder)
     pid = FOTO_ID
