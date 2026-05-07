@@ -142,12 +142,21 @@ def construir_atributos(prod: dict) -> list:
     attrs.append({"id": "BRAND", "value_name": marca})
     attrs.append({"id": "MODEL", "value_name": prod["nombre_base"].title()[:50]})
     if any(x in n for x in ["MUJER","FEMME","DAMA"]):
-        gender_id, gender_name = "339665", "Mujer"
+        gender_name = "Mujer"
+        gender_id = "339665"
     elif "HOMBRE" in n:
-        gender_id, gender_name = "339666", "Hombre"
+        gender_name = "Hombre"
+        gender_id = "339666"
     else:
-        gender_id, gender_name = "110461", "Sin género"
-    attrs.append({"id": "GENDER", "value_id": gender_id, "value_name": gender_name})
+        gender_name = "Sin género"
+        gender_id = "110461"
+    # Para calzado de seguridad MLC179382 algunos value_ids fallan
+    # (ej. 'Mujer' en algunos charts). Mandamos solo value_name para que ML
+    # resuelva el value_id correcto del chart de tallas.
+    if es_calzado_real(prod.get("nombre_base", "")):
+        attrs.append({"id": "GENDER", "value_name": gender_name})
+    else:
+        attrs.append({"id": "GENDER", "value_id": gender_id, "value_name": gender_name})
     if es_calzado_real(prod.get("nombre_base", "")):
         attrs.append({"id": "SIZE_GRID_ID", "value_name": SIZE_GRID_ID})
     return attrs
@@ -388,6 +397,13 @@ def publicar_nuevo(prod: dict, ml: MLClient, dry_run: bool, pic_cache: dict = No
     if not precios_validos:
         return None
     precio_b  = min(precios_validos)
+    precio_max = max(precios_validos)
+    # Si las variaciones tienen precios muy distintos (>50% diferencia), ML rechaza
+    # con "item.variations.price.different". Saltamos: probablemente es un nombre_base
+    # genérico del scraper agrupando productos distintos.
+    if precio_max > precio_b * 1.5:
+        log(f"  SKIP precios muy distintos en variantes (${precio_b:,}–${precio_max:,})")
+        return "SKIP"
     stock_tot = sum(v["available_quantity"] for v in variaciones)
 
     payload = {
