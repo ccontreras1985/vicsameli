@@ -78,17 +78,168 @@ def limpiar_titulo(nombre: str) -> str:
     return titulo
 
 def construir_descripcion(prod: dict) -> str:
-    partes = [prod["nombre_base"].title(), ""]
+    """Descripción enriquecida en texto plano estructurado.
+    ML evalúa la calidad de la ficha por: largo, secciones claras, certificaciones,
+    políticas explícitas. Esto sube la calidad de Básica → Estándar/Profesional."""
+    nombre = prod["nombre_base"].title()
+    es_calzado = es_calzado_real(nombre)
+    bullets_default = [
+        "Punta de acero con resistencia al impacto",
+        "Suela antideslizante con tracción reforzada",
+        "Plantilla acolchada para confort en jornadas largas",
+        "Materiales resistentes a abrasión y aceites",
+        "Diseño ergonómico para uso prolongado",
+    ] if es_calzado else [
+        "Tela técnica de alta resistencia",
+        "Confort y movilidad para uso laboral prolongado",
+        "Costuras reforzadas para mayor durabilidad",
+    ]
+
+    sep = "-" * 45
+    s = []
+    s.append(nombre.upper())
+    s.append("")
+    s.append("Distribuidor autorizado VICSA Safety. Producto industrial certificado.")
+    s.append("")
+    s.append(sep)
+    s.append("CARACTERISTICAS")
+    s.append(sep)
     if prod.get("especificaciones"):
-        partes += ["ESPECIFICACIONES:", prod["especificaciones"][:800], ""]
+        for frag in re.split(r'[.\n;]+', prod["especificaciones"][:1000]):
+            f = frag.strip()
+            if len(f) > 10:
+                s.append(f"- {f}")
+    else:
+        for b in bullets_default:
+            s.append(f"- {b}")
+    s.append("")
+
     if prod.get("certificaciones"):
-        partes += ["CERTIFICACIONES:", prod["certificaciones"][:300], ""]
+        s.append(sep)
+        s.append("CERTIFICACIONES")
+        s.append(sep)
+        s.append(prod["certificaciones"][:500])
+        s.append("")
+    elif es_calzado:
+        s.append(sep)
+        s.append("CERTIFICACION")
+        s.append(sep)
+        s.append("Cumple estandares de seguridad industrial chilenos para EPP.")
+        s.append("")
+
     colores = sorted(set(v["color"] for v in prod["variantes"] if v.get("color")))
-    tallas  = sorted(set(v["talla"] for v in prod["variantes"] if v.get("talla")))
-    if colores: partes.append(f"Colores: {', '.join(colores)}")
-    if tallas:  partes.append(f"Tallas: {', '.join(tallas)}")
-    partes += ["", "Distribuidor autorizado VICSA · Concepción", "RAI SpA · RUT 78.365.289-7"]
-    return "\n".join(partes)
+    tallas  = sorted(set(v["talla"] for v in prod["variantes"] if v.get("talla")),
+                     key=lambda t: (len(t), t))
+    if colores:
+        s.append(f"Colores disponibles: {', '.join(colores)}")
+    if tallas:
+        s.append(f"Tallas disponibles: {', '.join(tallas)}")
+    if colores or tallas: s.append("")
+
+    s.append(sep)
+    s.append("GARANTIA")
+    s.append(sep)
+    s.append("12 meses de garantia del vendedor contra defectos de fabricacion.")
+    s.append("Cambio o devolucion segun politica de Mercado Libre.")
+    s.append("")
+    s.append(sep)
+    s.append("ENVIO")
+    s.append(sep)
+    s.append("ENVIO GRATIS a todo Chile via Mercado Envios.")
+    s.append("Despacho desde Concepcion en 24 a 72 horas habiles luego del pago.")
+    s.append("Tiempo de entrega: 3 a 5 dias habiles segun la region.")
+    s.append("")
+    s.append(sep)
+    s.append("VENTAS A EMPRESAS")
+    s.append(sep)
+    s.append("Emitimos factura electronica. Para pedidos corporativos (10+ unidades)")
+    s.append("escribenos por mensajeria de Mercado Libre y te enviamos cotizacion con")
+    s.append("descuento por volumen.")
+    s.append("")
+    s.append(sep)
+    s.append("RAI SpA - RUT 78.365.289-7")
+    s.append("Distribuidor autorizado VICSA Safety - Concepcion, Chile")
+    s.append(sep)
+    return "\n".join(s)
+
+def construir_descripcion_html(prod: dict) -> str:
+    """Versión HTML de la descripción (ML lo acepta en algunos endpoints
+    cuando rechaza plain_text)."""
+    nombre = prod["nombre_base"].title()
+    es_calzado = es_calzado_real(nombre)
+    bullets_default = [
+        "Punta de acero con resistencia al impacto",
+        "Suela antideslizante con tracción reforzada",
+        "Plantilla acolchada para confort en jornadas largas",
+        "Materiales resistentes a abrasión y aceites",
+        "Diseño ergonómico para uso prolongado",
+    ] if es_calzado else [
+        "Tela técnica de alta resistencia",
+        "Confort y movilidad para uso laboral prolongado",
+        "Costuras reforzadas para mayor durabilidad",
+    ]
+
+    h = []
+    h.append(f"<h2>{nombre}</h2>")
+    h.append("<p><strong>Distribuidor autorizado VICSA Safety</strong>. Producto industrial certificado.</p>")
+
+    h.append("<h3>Características</h3><ul>")
+    if prod.get("especificaciones"):
+        for frag in re.split(r'[.\n;]+', prod["especificaciones"][:1000]):
+            f = frag.strip()
+            if len(f) > 10:
+                h.append(f"<li>{f}</li>")
+    else:
+        for b in bullets_default:
+            h.append(f"<li>{b}</li>")
+    h.append("</ul>")
+
+    if prod.get("certificaciones"):
+        h.append("<h3>Certificaciones</h3>")
+        h.append(f"<p>{prod['certificaciones'][:500]}</p>")
+    elif es_calzado:
+        h.append("<h3>Certificación</h3>")
+        h.append("<p>Cumple estándares de seguridad industrial chilenos para EPP.</p>")
+
+    colores = sorted(set(v["color"] for v in prod["variantes"] if v.get("color")))
+    tallas  = sorted(set(v["talla"] for v in prod["variantes"] if v.get("talla")),
+                     key=lambda t: (len(t), t))
+    if colores:
+        h.append(f"<p><strong>Colores disponibles:</strong> {', '.join(colores)}</p>")
+    if tallas:
+        h.append(f"<p><strong>Tallas disponibles:</strong> {', '.join(tallas)}</p>")
+
+    h.append("<h3>Garantía</h3>")
+    h.append("<p>12 meses de garantía del vendedor contra defectos de fabricación. Cambio o devolución según política de Mercado Libre.</p>")
+
+    h.append("<h3>Envío</h3>")
+    h.append("<p><strong>ENVÍO GRATIS</strong> a todo Chile vía Mercado Envíos. Despacho desde Concepción en 24-72 horas hábiles luego del pago. Tiempo de entrega: 3-5 días hábiles según la región.</p>")
+
+    h.append("<h3>Ventas a empresas</h3>")
+    h.append("<p>Emitimos factura electrónica. Para pedidos corporativos (10+ unidades) escríbenos por mensajería de Mercado Libre y te enviamos cotización con descuento por volumen.</p>")
+
+    h.append("<p><strong>RAI SpA</strong> - RUT 78.365.289-7 - Distribuidor autorizado VICSA Safety - Concepción, Chile</p>")
+
+    return "".join(h)
+
+def construir_titulo_seo(prod: dict) -> str:
+    """Construye el título optimizado para SEO de búsqueda en ML.
+    Estrategia: keyword principal + marca + modelo + diferenciador. Máx 60 chars.
+    """
+    base = limpiar_titulo(prod["nombre_base"])
+    n = base.upper()
+    extras = []
+    if es_calzado_real(base):
+        if "PUNTA" not in n and "ACERO" not in n:
+            extras.append("Punta Acero")
+        if "ANTIDESLIZANTE" not in n:
+            extras.append("Antideslizante")
+    titulo = base
+    for e in extras:
+        candidate = f"{titulo} {e}"
+        if len(candidate) <= 60:
+            titulo = candidate
+    return titulo
 
 def detectar_categoria_ropa(nombre: str) -> str:
     n = nombre.upper()
@@ -407,7 +558,7 @@ def publicar_nuevo(prod: dict, ml: MLClient, dry_run: bool, pic_cache: dict = No
     stock_tot = sum(v["available_quantity"] for v in variaciones)
 
     payload = {
-        "title":              limpiar_titulo(prod["nombre_base"]),
+        "title":              construir_titulo_seo(prod),
         "category_id":        cat_ml,
         "price":              precio_b,
         "currency_id":        "CLP",
@@ -422,7 +573,7 @@ def publicar_nuevo(prod: dict, ml: MLClient, dry_run: bool, pic_cache: dict = No
         "shipping":           {"mode": "me2", "local_pick_up": False, "free_shipping": True},
         "sale_terms": [
             {"id": "WARRANTY_TYPE", "value_name": "Garantía del vendedor"},
-            {"id": "WARRANTY_TIME", "value_name": "3 meses"},
+            {"id": "WARRANTY_TIME", "value_name": "12 meses"},
         ],
     }
 

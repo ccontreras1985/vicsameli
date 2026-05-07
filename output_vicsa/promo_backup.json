@@ -1,0 +1,124 @@
+{
+  "MLC3919835408": {
+    "nombre": "Calzado Mack New Chicago",
+    "price_orig": 63984,
+    "price_promo": 52467,
+    "variations": [
+      {
+        "id": 193912602030,
+        "price_orig": 63984,
+        "price_promo": 52467
+      },
+      {
+        "id": 193912602032,
+        "price_orig": 63984,
+        "price_promo": 52467
+      },
+      {
+        "id": 193912602034,
+        "price_orig": 63984,
+        "price_promo": 52467
+      },
+      {
+        "id": 193912602036,
+        "price_orig": 63984,
+        "price_promo": 52467
+      }
+    ],
+    "factor": 0.82
+  },
+  "MLC3919796482": {
+    "nombre": "Calzado Mack New Denver",
+    "price_orig": 54064,
+    "price_promo": 44332,
+    "variations": [
+      {
+        "id": 193912975742,
+        "price_orig": 54064,
+        "price_promo": 44332
+      },
+      {
+        "id": 193912975744,
+        "price_orig": 54064,
+        "price_promo": 44332
+      },
+      {
+        "id": 193912975746,
+        "price_orig": 54064,
+        "price_promo": 44332
+      },
+      {
+        "id": 193912975748,
+        "price_orig": 54064,
+        "price_promo": 44332
+      },
+      {
+        "id": 193912975750,
+        "price_orig": 54064,
+        "price_promo": 44332
+      }
+    ],
+    "factor": 0.82
+  },
+  "MLC3919809676": {
+    "nombre": "Calzado Antiperforante Quebec",
+    "price_orig": 42064,
+    "price_promo": 34492,
+    "variations": [
+      {
+        "id": 193913301764,
+        "price_orig": 42064,
+        "price_promo": 34492
+      },
+      {
+        "id": 193913301766,
+        "price_orig": 42064,
+        "price_promo": 34492
+      },
+      {
+        "id": 193913301768,
+        "price_orig": 42064,
+        "price_promo": 34492
+      },
+      {
+        "id": 193913301770,
+        "price_orig": 42064,
+        "price_promo": 34492
+      },
+      {
+        "id": 193913301772,
+        "price_orig": 42064,
+        "price_promo": 34492
+      },
+      {
+        "id": 193913301774,
+        "price_orig": 42064,
+        "price_promo": 34492
+      },
+      {
+        "id": 193913301776,
+        "price_orig": 42064,
+        "price_promo": 34492
+      }
+    ],
+    "factor": 0.82
+  },
+  "MLC3919835412": {
+    "nombre": "Calzado Mack New Denver Pro",
+    "price_orig": 62384,
+    "price_promo": 51155,
+    "variations": [
+      {
+        "id": 193912602038,
+        "price_orig": 62384,
+        "price_promo": 51155
+      },
+      {
+        "id": 193912602040,
+        "price_orig": 62384,
+        "price_promo": 51155
+      }
+    ],
+    "factor": 0.82
+  }
+}
