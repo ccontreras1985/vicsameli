@@ -7,6 +7,17 @@ output_vicsa/catalogo_vicsa_*.json
 output_vicsa/catalogo_vicsa_*.csv
 output_vicsa/catalogo_vicsa_*.xlsx
 output_vicsa/stock_delta_*.json
+output_vicsa/catalogo_tbpass_*.json
+output_vicsa/tbpass_login.html
+output_vicsa/tbpass_producto.html
+output_vicsa/tbpass_api_producto.json
+output_vicsa/tbpass_state.json
+output_vicsa/tbpass_runtime.json
+output_vicsa/tbpass_runtime.txt
+output_vicsa/tbpass_network_*.json
+output_vicsa/tbpass_html_*.html
+output_vicsa/tbpass_slugs.json
+output_vicsa/tbpass_storage.json
 
 # OK persistir: state e índice de imágenes (los necesita GitHub Actions)
 # output_vicsa/ml_state.json

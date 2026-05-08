@@ -653,6 +653,30 @@ def actualizar_item(prod: dict, item_id: str, ml: MLClient, dry_run: bool) -> bo
     log(f"  ERR  {item_id}: {r.status_code} {r.text[:200]}")
     return False
 
+def cargar_overlay_tbpass(path_glob: str = "output_vicsa/catalogo_tbpass_*.json") -> dict:
+    """Carga el catálogo más reciente de tbpass y devuelve un map SKU → variante.
+    Permite hacer overlay de stock+precio para items HW (vicsa está desincronizado)."""
+    import glob as _g
+    paths = sorted(_g.glob(path_glob))
+    if not paths:
+        return {}
+    latest = paths[-1]
+    log(f"Overlay tbpass: {latest}")
+    d = json.load(open(latest, encoding="utf-8"))
+    overlay = {}
+    for p in d.get("productos", []):
+        if p.get("marca", "").lower() != "hardwork":
+            continue  # solo HW se reemplaza con datos de tbpass
+        for v in p.get("variantes", []):
+            overlay[v["sku"]] = {
+                "precio_neto":    v["precio_neto"],
+                "stock_publicar": v["stock_publicar"],
+                "stock_vicsa":    v["stock_vicsa"],
+                "fuente":         "tbpass",
+            }
+    log(f"  SKUs HW en overlay tbpass: {len(overlay)}")
+    return overlay
+
 def sync_completo(path: Path, ml: MLClient, state: dict, dry_run: bool, cats: list):
     log(f"=== SYNC COMPLETO: {path.name} ===")
     with open(path, encoding="utf-8") as f:
@@ -663,6 +687,20 @@ def sync_completo(path: Path, ml: MLClient, state: dict, dry_run: bool, cats: li
     log(f"Productos a procesar: {len(prods)}")
     pic_cache = cargar_picture_cache()
     log(f"Picture cache: {len(pic_cache)} imágenes ya subidas")
+
+    # Overlay tbpass: stock+precio reales para items HW
+    overlay = cargar_overlay_tbpass()
+    overlay_aplicado = 0
+    for prod in prods:
+        for v in prod["variantes"]:
+            if v["sku"] in overlay:
+                ov = overlay[v["sku"]]
+                v["precio_neto"]    = ov["precio_neto"]
+                v["stock_publicar"] = ov["stock_publicar"]
+                v["stock_vicsa"]    = ov["stock_vicsa"]
+                overlay_aplicado += 1
+    if overlay_aplicado:
+        log(f"Overlay tbpass aplicado a {overlay_aplicado} variantes HW (precio+stock real)")
 
     nuevos = act = skip = err = 0
     for i, prod in enumerate(prods):

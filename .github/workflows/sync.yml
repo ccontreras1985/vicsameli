@@ -15,14 +15,15 @@ name: RAI SPA · Sync Vicsa ↔ ML
 
 on:
   schedule:
-    - cron: '0 * * * *'   # cada hora — modo rápido
-    - cron: '0 6 * * *'   # 06:00 UTC = 03:00 Chile — modo completo
+    # Una vez al día a las 06:00 UTC (03:00 Chile) — modo completo
+    # Reducido desde cada hora para mantenerse dentro del free tier de GitHub Actions
+    - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
       modo:
         description: 'Modo de ejecución'
         required: true
-        default: 'rapido'
+        default: 'completo'
         type: choice
         options: [rapido, completo]
 
@@ -85,7 +86,7 @@ jobs:
           echo "::add-mask::$AT"
           echo "access_token=$AT" >> $GITHUB_OUTPUT
 
-      - name: Scraper
+      - name: Scraper Vicsa
         id: scraper
         env:
           VICSA_USER: ${{ secrets.VICSA_USER }}
@@ -93,18 +94,25 @@ jobs:
         run: |
           mkdir -p output_vicsa
           MODO="${{ steps.modo.outputs.modo }}"
-          # Si modo=rapido pero no hay catálogo baseline → caer a completo
           if [ "$MODO" = "rapido" ] && [ -z "$(ls output_vicsa/catalogo_vicsa_*.json 2>/dev/null)" ]; then
             echo "Sin baseline para rápido → corriendo completo."
             MODO="completo"
           fi
           echo "modo_efectivo=$MODO" >> $GITHUB_OUTPUT
-          # Por ahora solo calzado. Ropa pendiente: requiere crear SIZE_GRID textil.
           if [ "$MODO" = "completo" ]; then
             python scraper_v13.py --categorias "Calzado de Seguridad"
           else
             python scraper_v13.py --modo rapido --categorias "Calzado de Seguridad"
           fi
+
+      - name: Scraper tbpass (HW)
+        env:
+          TBPASS_USER:     ${{ secrets.TBPASS_USER }}
+          TBPASS_PASS:     ${{ secrets.TBPASS_PASS }}
+          TBPASS_HEADLESS: 'true'
+        run: |
+          # No falla todo el job si tbpass falla — el sync funciona igual
+          python scraper_tbpass.py || echo "WARN: scraper_tbpass falló, sigo sin overlay"
 
       - name: Sync con ML
         env:
@@ -141,7 +149,7 @@ jobs:
         run: |
           git config user.name  "rai-spa-bot"
           git config user.email "bot@raispa.cl"
-          git add output_vicsa/ml_state.json output_vicsa/ml_pictures_cache.json 2>/dev/null || true
+          git add output_vicsa/ml_state.json output_vicsa/ml_pictures_cache.json output_vicsa/tbpass_storage.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "chore: actualizar state ML [skip ci]"
             git push
