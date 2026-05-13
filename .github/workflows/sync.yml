@@ -14,10 +14,10 @@
 name: RAI SPA · Sync Vicsa ↔ ML
 
 on:
-  schedule:
-    # Una vez al día a las 06:00 UTC (03:00 Chile) — modo completo
-    # Reducido desde cada hora para mantenerse dentro del free tier de GitHub Actions
-    - cron: '0 6 * * *'
+  # CRON DESACTIVADO: el piloto está pausado mientras se evalúa el modelo de
+  # negocio con proveedor distinto a Vicsa. Para reactivar, descomentar la línea.
+  # schedule:
+  #   - cron: '0 6 * * *'   # 06:00 UTC = 03:00 Chile, una vez al día
   workflow_dispatch:
     inputs:
       modo:
